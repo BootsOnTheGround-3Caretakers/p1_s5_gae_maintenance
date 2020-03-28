@@ -1,0 +1,11 @@
+Flask==1.1.1
+google-api-python-client==1.7.11
+google-auth-httplib2==0.0.3
+google-cloud-ndb==1.0.0
+google-cloud-pubsub==1.2.0
+google-cloud-secret-manager==0.1.1
+google-cloud-tasks==1.4.0
+google-auth-oauthlib==0.4.1
+redis==3.4.1
+six==1.14.0
+uwsgi==2.0.18
