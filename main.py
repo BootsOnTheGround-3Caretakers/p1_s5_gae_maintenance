@@ -338,7 +338,7 @@ class GetUserProfile(CommonPostHandler):
             if not call_result['admin']:
                 return_msg += "Only admins can request the info of another user"
                 return {
-                    RDK.success: call_result[RDK.success], RDK.return_msg: return_msg, RDK.debug_data: debug_data,
+                    RDK.success: RC.ACL_check_failed, RDK.return_msg: return_msg, RDK.debug_data: debug_data,
                     'data': data
                 }
             #</end> check if the user is admin
