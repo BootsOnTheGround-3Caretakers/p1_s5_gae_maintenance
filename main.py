@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from __future__ import unicode_literals
 
 import datetime
+import json
 import logging
 import sys
 import time
@@ -19,8 +20,12 @@ sys.path.insert(0, 'includes')
 from webapp_class_wrapper import wrap_webapp_class
 from datavalidation import DataValidation
 from GCP_return_codes import FunctionReturnCodes as RC
-from error_handling import CR as RDK
+from error_handling import RDK
 from GCP_datastore_logging import LoggingFuctions
+from p1_global_settings import PostDataRules
+from p1_datastores import Datastores
+from p1_services import Services, TaskArguments
+from datastore_functions import DatastoreFunctions as DSF
 
 
 class OauthVerify(object):
@@ -34,27 +39,27 @@ class OauthVerify(object):
         authenticated = call_result['authenticated']
         debug_data.append(call_result)
 
-        if call_result['success'] != RC.success:
+        if call_result[RDK.success] != RC.success:
             params = {}
             for key in self.request.arguments():
                 params[key] = self.request.get(key, None)
 
             log_class = LoggingFuctions()
-            log_class.logError(call_result['success'], task_id, params, None, None, call_result['return_msg'],
-                               call_result['debug_data'], None)
-            if call_result['success'] == RC.failed_retry:
+            log_class.logError(call_result[RDK.success], task_id, params, None, None, call_result[RDK.return_msg],
+                               call_result[RDK.debug_data], None)
+            if call_result[RDK.success] == RC.failed_retry:
                 self.response.set_status(500)
-            elif call_result['success'] == RC.input_validation_failed:
+            elif call_result[RDK.success] == RC.input_validation_failed:
                 self.response.set_status(400)
-            elif call_result['success'] == RC.ACL_check_failed:
+            elif call_result[RDK.success] == RC.ACL_check_failed:
                 self.response.set_status(401)
 
         if authenticated == True:
-            return {'success': call_result['success'], 'return_msg': return_msg, 'debug_data': debug_data,
+            return {RDK.success: call_result[RDK.success], RDK.return_msg: return_msg, RDK.debug_data: debug_data,
                     'authenticated': authenticated}
         else:
             self.response.set_status(401)
-            return {'success': call_result['success'], 'return_msg': return_msg, 'debug_data': debug_data,
+            return {RDK.success: call_result[RDK.success], RDK.return_msg: return_msg, RDK.debug_data: debug_data,
                     'authenticated': authenticated}
 
     def VerifyTokenProcessRequest(self):
@@ -69,9 +74,9 @@ class OauthVerify(object):
                                         [user_email, True, unicode, "email_address"]
                                         ])
         debug_data.append(call_result)
-        if call_result['success'] != True:
+        if call_result[RDK.success] != True:
             return_msg += "input validation failed"
-            return {'success': RC.input_validation_failed, 'return_msg': return_msg, 'debug_data': debug_data,
+            return {RDK.success: RC.input_validation_failed, RDK.return_msg: return_msg, RDK.debug_data: debug_data,
                     'authenticated': authenticated}
 
         ##</end> validate input
@@ -90,12 +95,12 @@ class OauthVerify(object):
             client_token_id) + '|verified_token_expiration:' + unicode(
             verified_token_expiration) + '|current_time:' + unicode(current_time))
         tokens_match = False
-        if verified_token_id != None and verified_token_id == client_token_id:
+        if verified_token_id and verified_token_id == client_token_id:
             tokens_match = True
 
-        if verified_token_id != None and verified_token_id == client_token_id and verified_token_expiration > current_time:
+        if verified_token_id and verified_token_id == client_token_id and verified_token_expiration > current_time:
             authenticated = True
-            return {'success': RC.success, 'return_msg': return_msg, 'debug_data': debug_data,
+            return {RDK.success: RC.success, RDK.return_msg: return_msg, RDK.debug_data: debug_data,
                     'authenticated': authenticated}
         ##</end> try to pull cached data
 
@@ -105,15 +110,15 @@ class OauthVerify(object):
         external_oauth = OauthExternalVerify()
         call_result = external_oauth.VerifyTokenID(client_token_id, user_email)
         debug_data.append(call_result)
-        if call_result['success'] != RC.success:
+        if call_result[RDK.success] != RC.success:
             return_msg += "oauth external call failed"
-            return {'success': call_result['success'], 'return_msg': return_msg, 'debug_data': debug_data,
+            return {RDK.success: call_result[RDK.success], RDK.return_msg: return_msg, RDK.debug_data: debug_data,
                     'authenticated': authenticated}
 
         authenticated = call_result['authenticated']
         ##</end> use the external libraray to auth
 
-        return {'success': RC.success, 'return_msg': return_msg, 'debug_data': debug_data,
+        return {RDK.success: RC.success, RDK.return_msg: return_msg, RDK.debug_data: debug_data,
                 'authenticated': authenticated}
 
 
@@ -140,7 +145,7 @@ class CommonPostHandler(DataValidation, OauthVerify):
 
     def post(self, *args, **kwargs):
         debug_data = []
-        task_id = 'create-transaction:CommonPostHandler:post'
+        task_id = 'json-requests:CommonPostHandler:post'
 
         self.response.headers[str('Access-Control-Allow-Headers')] = str(
             'Cache-Control, Pragma, Origin, Authorization, Content-Type, X-Requested-With')
@@ -149,12 +154,12 @@ class CommonPostHandler(DataValidation, OauthVerify):
         call_result = self.VerifyToken()
         debug_data.append(call_result)
         if call_result['authenticated'] != RC.success:
-            self.response.set_status(401)
+            self.create_response(call_result)
             return
 
         call_result = self.process_request(*args, **kwargs)
         debug_data.append(call_result)
-        if call_result['success'] != RC.success:
+        if call_result[RDK.success] != RC.success:
             params = {}
             for key in self.request.arguments():
                 params[key] = self.request.get(key, None)
@@ -165,7 +170,7 @@ class CommonPostHandler(DataValidation, OauthVerify):
         self.create_response(call_result)
 
     def create_response(self, call_result):
-        if call_result['success'] == RC.success:
+        if call_result[RDK.success] == RC.success:
             self.create_success_response(call_result)
         else:
             self.create_error_response(call_result)
@@ -174,14 +179,33 @@ class CommonPostHandler(DataValidation, OauthVerify):
         self.response.set_status(204)
 
     def create_error_response(self, call_result):
-        if call_result['success'] == RC.failed_retry:
+        if call_result[RDK.success] == RC.failed_retry:
             self.response.set_status(500)
-        elif call_result['success'] == RC.input_validation_failed:
+        elif call_result[RDK.success] == RC.input_validation_failed:
             self.response.set_status(400)
-        elif call_result['success'] == RC.ACL_check_failed:
+        elif call_result[RDK.success] == RC.ACL_check_failed:
             self.response.set_status(401)
 
-        self.response.out.write(call_result['return_msg'])
+        self.response.out.write(call_result[RDK.return_msg])
+
+    def is_admin_user_uid(self, user_uid):
+        task_id = 'json-requests:CommonPostHandler:is_admin_user_uid'
+        return_msg = task_id + ": "
+        debug_data = []
+        admin = False
+
+        key = ndb.Key(Datastores.admin._get_kind(), user_uid)
+        call_result = DSF.kget(key)
+        debug_data.append(call_result)
+        if call_result[RDK.success] != RC.success:
+            return_msg += "Failed to load admin data from datastore"
+            return {
+                RDK.success: call_result[RDK.success], RDK.return_msg: return_msg, RDK.debug_data: debug_data,
+                'admin': admin
+            }
+        admin = bool(call_result['get_result'])
+
+        return {RDK.success: RC.success, RDK.return_msg: return_msg, RDK.debug_data: debug_data, 'admin': admin}
 
 
 @app.route("/p1s5t1-oauth-verify", methods=["OPTIONS", "POST"])
@@ -192,7 +216,394 @@ class OAuthVerifyRequest(CommonPostHandler):
         debug_data = []
         return_msg = task_id + ": "
 
-        return {'success': RC.success, 'return_msg': return_msg, 'debug_data': debug_data}
+        return {RDK.success: RC.success, RDK.return_msg: return_msg, RDK.debug_data: debug_data}
+
+
+@app.route(Services.json_requests.get_user_profile.url, methods=["OPTIONS", "POST"])
+@wrap_webapp_class(Services.json_requests.get_user_profile.name)
+class GetUserProfile(CommonPostHandler):
+    def create_success_response(self, call_result):
+        self.response.set_status(200)
+        self.response.headers['Content-Type'] = "application/json"
+        self.response.out.write(json.dumps(call_result['data']))
+
+    def process_request(self):
+        task_id = 'json-requests:GetUserProfile:process_request'
+        debug_data = []
+        return_msg = task_id + ": "
+        data = {}
+
+        # input validation
+        phone_number = unicode(self.request.get(TaskArguments.s5t1_phone_number, "")) or None
+        user_uid = unicode(self.request.get(TaskArguments.s5t1_user_uid, "")) or None
+        requesting_user_uid = unicode(self.request.get(TaskArguments.s5t1_requesting_user_uid, "")) or None
+
+        call_result = self.ruleCheck([
+            [phone_number, Datastores.users._rule_phone_1],
+            [user_uid, PostDataRules.optional_uid],
+            [requesting_user_uid, PostDataRules.optional_uid],
+        ])
+
+        debug_data.append(call_result)
+        if call_result[RDK.success] != RC.success:
+            return_msg += "input validation failed"
+            return {
+                RDK.success: RC.input_validation_failed, RDK.return_msg: return_msg, RDK.debug_data: debug_data,
+                'data': data
+            }
+
+        user_uid = long(user_uid) if user_uid else None
+        requesting_user_uid = long(requesting_user_uid) if requesting_user_uid else None
+
+        if not (phone_number or user_uid):
+            return_msg += "Either phone_number or user_uid must be specified"
+            return {
+                RDK.success: RC.input_validation_failed, RDK.return_msg: return_msg, RDK.debug_data: debug_data,
+                'data': data
+            }
+
+        user = None
+        if user_uid:
+            key = ndb.Key(Datastores.users._get_kind(), user_uid)
+            call_result = DSF.kget(key)
+            debug_data.append(call_result)
+            if call_result[RDK.success] != RC.success:
+                return_msg += "Failed to load user from datastore"
+                return {
+                    RDK.success: RC.input_validation_failed, RDK.return_msg: return_msg, RDK.debug_data: debug_data,
+                    'data': data
+                }
+            user = call_result['get_result']
+
+        if not user:
+            user_query = Datastores.users.query(Datastores.users.phone_1 == phone_number)
+            call_result = DSF.kfetch(user_query)
+            debug_data.append(call_result)
+            if call_result[RDK.success] != RC.success:
+                return_msg += "Failed to load users from datastore"
+                return {
+                    RDK.success: RC.input_validation_failed, RDK.return_msg: return_msg, RDK.debug_data: debug_data,
+                    'data': data
+                }
+            users = call_result['fetch_result']
+            if users:
+                user = users[0]
+
+        if not user:
+            return_msg += "User not found"
+            return {
+                RDK.success: RC.input_validation_failed, RDK.return_msg: return_msg, RDK.debug_data: debug_data,
+                'data': data
+            }
+
+        requesting_user = None
+        if requesting_user_uid:
+            key = ndb.Key(Datastores.users._get_kind(), requesting_user_uid)
+            call_result = DSF.kget(key)
+            debug_data.append(call_result)
+            if call_result[RDK.success] != RC.success:
+                return_msg += "Failed to load requesting user from datastore"
+                return {
+                    RDK.success: RC.input_validation_failed, RDK.return_msg: return_msg, RDK.debug_data: debug_data,
+                    'data': data
+                }
+            requesting_user = call_result['get_result']
+        #</end> input validation
+
+        # check if firebase_email matches user_uid/requesting_user_uid
+        firebase_email = unicode(self.request.get('p1s5_firebase_email', ''))
+        if requesting_user:
+            email_matches = firebase_email == requesting_user.email_address
+        else:
+            email_matches = firebase_email == user.email_address
+
+        if not email_matches:
+            return_msg += "firebase_email doesn't match the user_uid/requesting_user_uid"
+            return {
+                RDK.success: RC.input_validation_failed, RDK.return_msg: return_msg, RDK.debug_data: debug_data,
+                'data': data
+            }
+        #</end> check if firebase_email matches user_uid/requesting_user_uid
+
+        if requesting_user and (requesting_user_uid != user_uid):
+            # check if the user is admin
+            call_result = self.is_admin_user_uid(requesting_user_uid)
+            debug_data.append(call_result)
+            if call_result[RDK.success] != RC.success:
+                return_msg += "Failed to call is_admin_user_uid"
+                return {
+                    RDK.success: call_result[RDK.success], RDK.return_msg: return_msg, RDK.debug_data: debug_data,
+                    'data': data
+                }
+            if not call_result['admin']:
+                return_msg += "Only admins can request the info of another user"
+                return {
+                    RDK.success: call_result[RDK.success], RDK.return_msg: return_msg, RDK.debug_data: debug_data,
+                    'data': data
+                }
+            #</end> check if the user is admin
+
+        # user info
+        data['user'] = {
+            'first_name': user.first_name or '',
+            'last_name': user.last_name or '',
+            'phone_1': user.phone_1 or '',
+            'phone_texts': user.phone_texts or '',
+            'email_address': user.email_address or '',
+            'country_uid': user.country_uid or '',
+            'region_uid': user.region_uid or '',
+            'area_uid': user.area_uid or '',
+            'description': user.description or '',
+            'preferred_radius': user.preferred_radius,
+            'account_flags': user.account_flags or '',
+            'location_cord_lat': user.location_cords and user.location_cords.latitude,
+            'location_cord_long': user.location_cords and user.location_cords.longitude,
+        }
+        #</end> user info
+
+        # user skills
+        skill_keys = []
+        skill_info_list = []
+        query = Datastores.caretaker_skills_joins.query(ancestor=user.key)
+        call_result = DSF.kfetch(query)
+        debug_data.append(call_result)
+        if call_result[RDK.success] != RC.success:
+            return_msg += "Failed to load skill_joins from datastore"
+            return {
+                RDK.success: call_result[RDK.success], RDK.return_msg: return_msg, RDK.debug_data: debug_data,
+                'data': data
+            }
+
+        skill_joins = call_result['fetch_result']
+        for skill_join in skill_joins:
+            skill_info_list.append({
+                'skill_uid': skill_join.skill_uid,
+                'notes': skill_join.special_notes or '',
+            })
+            skill_keys.append(ndb.Key(Datastores.caretaker_skills._get_kind(), skill_join.skill_uid))
+
+        call_result = DSF.kget_multi(skill_keys)
+        debug_data.append(call_result)
+        if call_result[RDK.success] != RC.success:
+            return_msg += "Failed to load skill from datastore"
+            return {
+                RDK.success: call_result[RDK.success], RDK.return_msg: return_msg, RDK.debug_data: debug_data,
+                'data': data
+            }
+        skills = call_result['get_result']
+        skill_map = {}
+        for skill in skills:
+            skill_map[skill.key.id()] = skill
+        for idx, skill_info in enumerate(skill_info_list):
+            skill = skill_map[skill_info['skill_uid']]
+            skill_info_list[idx].update({
+                'name': skill.name,
+                'description': skill.description,
+            })
+        data['skills'] = skill_info_list
+        #</end> user skills
+
+        # user cluster
+        query = Datastores.cluster_pointer.query(ancestor=user.key)
+        call_result = DSF.kfetch(query)
+        debug_data.append(call_result)
+        if call_result[RDK.success] != RC.success:
+            return_msg += "Failed to load cluster_pointers from datastore"
+            return {
+                RDK.success: call_result[RDK.success], RDK.return_msg: return_msg, RDK.debug_data: debug_data,
+                'data': data
+            }
+        cluster_pointers = call_result['fetch_result']
+        data['clusters'] = [cluster_pointer.cluster_uid for cluster_pointer in cluster_pointers]
+        #</end> user cluster
+
+        # needers
+        query = Datastores.needer.query(ancestor=user.key)
+        call_result = DSF.kfetch(query)
+        debug_data.append(call_result)
+        if call_result[RDK.success] != RC.success:
+            return_msg += "Failed to load needers from datastore"
+            return {
+                RDK.success: call_result[RDK.success], RDK.return_msg: return_msg, RDK.debug_data: debug_data,
+                'data': data
+            }
+        needer_info_dict = {}
+        need_keys = []
+        needers = call_result['fetch_result']
+        for needer in needers:
+            query = Datastores.needer_needs_joins.query(ancestor=needer.key)
+            call_result = DSF.kfetch(query)
+            debug_data.append(call_result)
+            if call_result[RDK.success] != RC.success:
+                return_msg += "Failed to load needer_needs_joins from datastore"
+                return {
+                    RDK.success: call_result[RDK.success], RDK.return_msg: return_msg, RDK.debug_data: debug_data,
+                    'data': data
+                }
+            needer_needs_joins = call_result['fetch_result']
+            for needer_needs_join in needer_needs_joins:
+                needer_info_dict[needer.key.id()].append({
+                  "need_uid": needer_needs_join.need_uid, "notes": needer_needs_join.special_requests or ''
+                })
+                need_keys.append(ndb.Key(Datastores.needs._get_kind(), needer_needs_join.need_uid))
+
+        call_result = DSF.kget_multi(need_keys)
+        debug_data.append(call_result)
+        if call_result[RDK.success] != RC.success:
+            return_msg += "Failed to load needs from datastore"
+            return {
+                RDK.success: call_result[RDK.success], RDK.return_msg: return_msg, RDK.debug_data: debug_data,
+                'data': data
+            }
+        needs = call_result['get_result']
+        need_map = {}
+        for need in needs:
+            need_map[need.key.id()] = need
+
+        for needer_uid in needer_info_dict:
+            for idx, need_info in enumerate(needer_info_dict[needer_uid]):
+                need = need_map[need_info['need_uid']]
+                needer_info_dict[needer_uid][idx].update({
+                    'name': need.name,
+                    'description': need.requirements,
+                })
+
+        data['needers'] = needer_info_dict
+        #</end> needers
+
+        return {RDK.success: RC.success, RDK.return_msg: return_msg, RDK.debug_data: debug_data, 'data': data}
+
+
+@app.route(Services.json_requests.get_cluster_data.url, methods=["OPTIONS", "POST"])
+@wrap_webapp_class(Services.json_requests.get_cluster_data.name)
+class GetClusterData(CommonPostHandler):
+    def create_success_response(self, call_result):
+        self.response.set_status(200)
+        self.response.headers['Content-Type'] = "application/json"
+        self.response.out.write(json.dumps(call_result['data']))
+
+    def process_request(self):
+        task_id = 'json-requests:GetClusterData:process_request'
+        debug_data = []
+        return_msg = task_id + ": "
+        data = {}
+
+        # input validation
+        cluster_uids = unicode(self.request.get(TaskArguments.s5t2_cluster_uids, ""))
+
+        call_result = self.ruleCheck([
+            [cluster_uids, PostDataRules.required_name],
+        ])
+        debug_data.append(call_result)
+        if call_result[RDK.success] != RC.success:
+            return_msg += "input validation failed"
+            return {
+                RDK.success: RC.input_validation_failed, RDK.return_msg: return_msg, RDK.debug_data: debug_data,
+                'data': data
+            }
+
+        try:
+            cluster_uids = [long(uid.strip()) for uid in cluster_uids.split(",") if uid.strip()]
+        except Exception as exc:
+            return_msg += str(exc)
+            return {
+                RDK.success: RC.input_validation_failed, RDK.return_msg: return_msg, RDK.debug_data: debug_data,
+                'data': data
+            }
+        #</end> input validation
+
+        cluster_keys = [ndb.Key(Datastores.cluster._get_kind(), uid) for uid in cluster_uids]
+        call_result = DSF.kget_multi(cluster_keys)
+        debug_data.append(call_result)
+        if call_result[RDK.success] != RC.success:
+            return_msg += "Failed to load clusters from datastore"
+            return {
+                RDK.success: RC.input_validation_failed, RDK.return_msg: return_msg, RDK.debug_data: debug_data,
+                'data': data
+            }
+        clusters = call_result['get_result']
+
+        user_keys = []
+        cluster_info = {}
+        for idx, cluster in enumerate(clusters):
+            if not cluster:
+                continue
+
+            cluster_joins_query = Datastores.cluster_joins.query(ancestor=cluster.key)
+            call_result = DSF.kfetch(cluster_joins_query)
+            debug_data.append(call_result)
+            if call_result[RDK.success] != RC.success:
+                return_msg += "Failed to load cluster joins from datastore"
+                return {
+                    RDK.success: RC.input_validation_failed, RDK.return_msg: return_msg, RDK.debug_data: debug_data,
+                    'data': data
+                }
+            user_info_list = []
+            needer_need_info_list = []
+            cluster_joins = call_result['fetch_result']
+            for cluster_join in cluster_joins:
+                user_info_list.append({
+                    'user_uid': cluster_join.user_uid,
+                    'roles': cluster_join.roles,
+                })
+
+                user_keys.append(ndb.Key(Datastores.users._get_kind(), cluster_join.user_uid))
+
+                needer_needs_ancestor_key = ndb.Key(
+                    Datastores.users._get_kind(), cluster_join.user_uid,
+                    Datastores.needer._get_kind(), cluster.needer_uid,
+                )
+                needer_needs_query = Datastores.needer_needs_joins.query(ancestor=needer_needs_ancestor_key)
+                call_result = DSF.kfetch(needer_needs_query)
+                debug_data.append(call_result)
+                if call_result[RDK.success] != RC.success:
+                    return_msg += "Failed to load needer needs joins from datastore"
+                    return {
+                        RDK.success: RC.input_validation_failed, RDK.return_msg: return_msg, RDK.debug_data: debug_data,
+                        'data': data
+                    }
+                needer_need_joins = call_result['fetch_result']
+                for needer_need_join in needer_need_joins:
+                    if not needer_need_join:
+                        continue
+
+                    needer_need_info_list.append({
+                        "need_uid": needer_need_join.need_uid,
+                        "notes": needer_need_join.special_requests,
+                    })
+
+            cluster_info[cluster_uids[idx]] = {
+                "needer_uid": cluster.needer_uid,
+                "needer_needs": needer_need_info_list,
+                'users': user_info_list,
+            }
+
+        call_result = DSF.kget_multi(user_keys)
+        debug_data.append(call_result)
+        if call_result[RDK.success] != RC.success:
+            return_msg += "Failed to load users from datastore"
+            return {
+                RDK.success: RC.input_validation_failed, RDK.return_msg: return_msg, RDK.debug_data: debug_data,
+                'data': data
+            }
+        users = call_result['get_result']
+        user_map = {}
+        for cluster_user in users:
+            if not cluster_user:
+                continue
+            user_map[cluster_user.key.id()] = cluster_user
+
+        for cluster_uid in cluster_info:
+            for idx, user_info in enumerate(cluster_info[cluster_uid]['users']):
+                cluster_user = user_map[user_info['user_uid']]
+                cluster_info[cluster_uid]['users'][idx].update({
+                    "name": "{} {}".format(cluster_user.first_name or '', cluster_user.last_name or '').strip(),
+                    "phone_1": cluster_user.phone_1 or '',
+                    "phone_2": cluster_user.phone_2 or '',
+                })
+
+        data['clusters'] = cluster_info
+        return {RDK.success: RC.success, RDK.return_msg: return_msg, RDK.debug_data: debug_data, 'data': data}
 
 
 if __name__ == "__main__":
