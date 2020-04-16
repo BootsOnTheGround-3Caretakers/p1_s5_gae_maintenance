@@ -308,7 +308,7 @@ class GetUserProfile(CommonPostHandler):
                     'data': data
                 }
             requesting_user = call_result['get_result']
-        #</end> input validation
+        # </end> input validation
 
         # check if firebase_email matches user_uid/requesting_user_uid
         firebase_email = unicode(self.request.get('p1s5_firebase_email', ''))
@@ -323,7 +323,7 @@ class GetUserProfile(CommonPostHandler):
                 RDK.success: RC.input_validation_failed, RDK.return_msg: return_msg, RDK.debug_data: debug_data,
                 'data': data
             }
-        #</end> check if firebase_email matches user_uid/requesting_user_uid
+        # </end> check if firebase_email matches user_uid/requesting_user_uid
 
         if requesting_user and (requesting_user_uid != user_uid):
             # check if the user is admin
@@ -341,7 +341,7 @@ class GetUserProfile(CommonPostHandler):
                     RDK.success: RC.ACL_check_failed, RDK.return_msg: return_msg, RDK.debug_data: debug_data,
                     'data': data
                 }
-            #</end> check if the user is admin
+            # </end> check if the user is admin
 
         # user info
         data['user'] = {
@@ -359,7 +359,7 @@ class GetUserProfile(CommonPostHandler):
             'location_cord_lat': user.location_cords and user.location_cords.latitude,
             'location_cord_long': user.location_cords and user.location_cords.longitude,
         }
-        #</end> user info
+        # </end> user info
 
         # user skills
         skill_keys = []
@@ -401,7 +401,7 @@ class GetUserProfile(CommonPostHandler):
                 'description': skill.description,
             })
         data['skills'] = skill_info_list
-        #</end> user skills
+        # </end> user skills
 
         # user cluster
         query = Datastores.cluster_pointer.query(ancestor=user.key)
@@ -415,7 +415,7 @@ class GetUserProfile(CommonPostHandler):
             }
         cluster_pointers = call_result['fetch_result']
         data['clusters'] = [cluster_pointer.cluster_uid for cluster_pointer in cluster_pointers]
-        #</end> user cluster
+        # </end> user cluster
 
         # needers
         query = Datastores.needer.query(ancestor=user.key)
@@ -443,7 +443,7 @@ class GetUserProfile(CommonPostHandler):
             needer_needs_joins = call_result['fetch_result']
             for needer_needs_join in needer_needs_joins:
                 needer_info_dict[needer.key.id()].append({
-                  "need_uid": needer_needs_join.need_uid, "notes": needer_needs_join.special_requests or ''
+                    "need_uid": needer_needs_join.need_uid, "notes": needer_needs_join.special_requests or ''
                 })
                 need_keys.append(ndb.Key(Datastores.needs._get_kind(), needer_needs_join.need_uid))
 
@@ -469,7 +469,7 @@ class GetUserProfile(CommonPostHandler):
                 })
 
         data['needers'] = needer_info_dict
-        #</end> needers
+        # </end> needers
 
         return {RDK.success: RC.success, RDK.return_msg: return_msg, RDK.debug_data: debug_data, 'data': data}
 
@@ -510,7 +510,7 @@ class GetClusterData(CommonPostHandler):
                 RDK.success: RC.input_validation_failed, RDK.return_msg: return_msg, RDK.debug_data: debug_data,
                 'data': data
             }
-        #</end> input validation
+        # </end> input validation
 
         cluster_keys = [ndb.Key(Datastores.cluster._get_kind(), uid) for uid in cluster_uids]
         call_result = DSF.kget_multi(cluster_keys)
@@ -604,6 +604,73 @@ class GetClusterData(CommonPostHandler):
 
         data['clusters'] = cluster_info
         return {RDK.success: RC.success, RDK.return_msg: return_msg, RDK.debug_data: debug_data, 'data': data}
+
+
+@app.route(Services.json_requests.check_if_user_exists.url, methods=["OPTIONS", "POST"])
+@wrap_webapp_class(Services.json_requests.check_if_user_exists.name)
+class CheckIfUserExists(CommonPostHandler):
+    def create_success_response(self, call_result):
+        self.response.set_status(200)
+        self.response.headers['Content-Type'] = "application/json"
+        exists = call_result['exists']
+        self.response.out.write(json.dumps({'exists': exists}))
+
+    def process_request(self):
+        task_id = 'json-requests:CheckIfUserExists:process_request'
+        debug_data = []
+        return_msg = task_id + ": "
+        exists = False
+
+        # input validation
+        email_address = unicode(self.request.get(TaskArguments.s5t3_email_address, "")) or None
+        phone_number = unicode(self.request.get(TaskArguments.s5t3_phone_number, "")) or None
+
+        call_result = self.ruleCheck([
+            [email_address, PostDataRules.optional_name],
+            [phone_number, PostDataRules.optional_name],
+        ])
+        debug_data.append(call_result)
+        if call_result[RDK.success] != RC.success:
+            return_msg += "input validation failed"
+            return {
+                RDK.success: RC.input_validation_failed, RDK.return_msg: return_msg, RDK.debug_data: debug_data,
+                'exists': exists
+            }
+
+        if not (email_address or phone_number):
+            return_msg += "Email address or phone number must be specified"
+            return {
+                RDK.success: RC.input_validation_failed, RDK.return_msg: return_msg, RDK.debug_data: debug_data,
+                'exists': exists
+            }
+        #</end> input validation
+
+        if email_address and phone_number:
+            user_query = Datastores.users.query(ndb.OR(
+                Datastores.users.phone_1 == phone_number,
+                Datastores.users.phone_2 == phone_number,
+                Datastores.users.email_address == email_address,
+            ))
+        elif email_address:
+            user_query = Datastores.users.query(Datastores.users.email_address == email_address)
+        else:
+            user_query = Datastores.users.query(ndb.OR(
+                Datastores.users.phone_1 == phone_number, Datastores.users.phone_2 == phone_number,
+            ))
+
+        call_result = DSF.kfetch(user_query)
+        debug_data.append(call_result)
+        if call_result[RDK.success] != RC.success:
+            return_msg += "Failed to load users from datastore"
+            return {
+                RDK.success: RC.input_validation_failed, RDK.return_msg: return_msg, RDK.debug_data: debug_data,
+                'exists': exists,
+            }
+        users = call_result['fetch_result']
+        if users:
+            exists = True
+
+        return {RDK.success: RC.success, RDK.return_msg: return_msg, RDK.debug_data: debug_data, 'exists': exists}
 
 
 if __name__ == "__main__":
