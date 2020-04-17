@@ -12,6 +12,10 @@ class Request(object):
         return flask.request.values.get(key, default)
 
     @property
+    def headers(self):
+        return flask.request.headers
+
+    @property
     def files(self):
         return flask.request.files
 
