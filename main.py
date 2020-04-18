@@ -399,7 +399,7 @@ class GetUserProfile(CommonPostHandler):
         for idx, skill_info in enumerate(skill_info_list):
             skill = skill_map[skill_info['skill_uid']]
             skill_info_list[idx].update({
-                'name': skill.name,
+                'name': skill.skill_name,
                 'description': skill.description,
             })
         data['skills'] = skill_info_list
