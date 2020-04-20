@@ -347,6 +347,7 @@ class GetUserProfile(CommonPostHandler):
 
         # user info
         data['user'] = {
+            'user_uid': user.key.id(),
             'first_name': user.first_name or '',
             'last_name': user.last_name or '',
             'phone_1': user.phone_1 or '',
