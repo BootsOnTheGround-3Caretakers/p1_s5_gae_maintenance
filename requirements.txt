@@ -6,6 +6,6 @@ google-cloud-pubsub==1.2.0
 google-cloud-secret-manager==0.1.1
 google-cloud-tasks==1.4.0
 google-auth-oauthlib==0.4.1
-redis==3.4.1
+redis==4.4.4
 six==1.14.0
 uwsgi==2.0.18
